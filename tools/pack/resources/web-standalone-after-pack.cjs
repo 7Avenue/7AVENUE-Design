@@ -650,7 +650,10 @@ async function signMacAdhocBundle(appPath) {
   await normalizeMacVersionedFrameworks(appPath);
   const targets = await collectMacAdhocSignTargets(appPath);
   for (const target of targets) {
-    await execFileAsync("codesign", ["--force", "--sign", "-", "--timestamp=none", target], {
+    // 7AVENUE: add --deep so nested objects (e.g. Electron Framework's
+    // chrome_crashpad_handler) sign innermost-first. Without it, ad-hoc
+    // signing fails with "code object is not signed at all" on local builds.
+    await execFileAsync("codesign", ["--force", "--deep", "--sign", "-", "--timestamp=none", target], {
       maxBuffer: 20 * 1024 * 1024,
     });
   }

@@ -804,7 +804,7 @@ function createPendingHtml(): string {
     <style>
       html,
       body {
-        background: #f2f4f5;
+        background: #0E0E10;
         height: 100%;
         margin: 0;
         overflow: hidden;
@@ -815,7 +815,7 @@ function createPendingHtml(): string {
         justify-content: center;
       }
       video {
-        background: #f2f4f5;
+        background: #0E0E10;
         height: auto;
         max-height: 100%;
         max-width: 100%;
@@ -875,7 +875,7 @@ export function createSplashWindow(): SplashWindowHandle {
   const startedAt = Date.now();
   const splash = new BrowserWindow({
     autoHideMenuBar: true,
-    backgroundColor: "#f2f4f5",
+    backgroundColor: "#0E0E10",
     frame: false,
     height: 900,
     resizable: false,
