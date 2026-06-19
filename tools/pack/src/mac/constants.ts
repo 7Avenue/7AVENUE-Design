@@ -1,4 +1,4 @@
-export const PRODUCT_NAME = "Open Design";
+export const PRODUCT_NAME = "7AVENUE Studio";
 
 export const INTERNAL_PACKAGES = [
   { directory: "packages/components", name: "@open-design/components" },
