@@ -1,0 +1,70 @@
+# 7AVENUE: simple on-demand Windows build for 7AVENUE Studio.
+# Builds the Windows .exe installer on a cloud Windows runner (a Mac can't
+# build a Windows app) and uploads it as a downloadable artifact. No R2 /
+# PostHog / release-channel machinery — just "click Run, download the .exe".
+name: build-windows-7avenue
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: build-windows-7avenue
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    name: Build 7AVENUE Studio (Windows .exe)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install NSIS (installer toolchain)
+        shell: pwsh
+        run: |
+          if (-not ((Get-Command makensis.exe -ErrorAction SilentlyContinue) -or (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe"))) {
+            choco install nsis -y --no-progress
+          }
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Windows app (nsis installer + portable zip)
+        run: pnpm exec tools-pack win build --to all --portable
+
+      - name: Locate build artifacts
+        id: artifacts
+        shell: pwsh
+        run: |
+          $builder = Get-ChildItem -Path ".tmp/tools-pack/out/win" -Recurse -Directory -Filter "builder" | Select-Object -First 1
+          if (-not $builder) { throw "No builder output directory found" }
+          Write-Host "Builder dir: $($builder.FullName)"
+          Get-ChildItem -Path $builder.FullName -Include *.exe,*.zip -Recurse | ForEach-Object { Write-Host "  artifact: $($_.Name) ($([math]::Round($_.Length/1MB,1)) MB)" }
+          "builder_dir=$($builder.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload Windows installer (.exe) + portable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: 7AVENUE-Studio-Windows
+          path: |
+            ${{ steps.artifacts.outputs.builder_dir }}/*-setup.exe
+            ${{ steps.artifacts.outputs.builder_dir }}/*-portable.zip
+          if-no-files-found: error
+          retention-days: 30
