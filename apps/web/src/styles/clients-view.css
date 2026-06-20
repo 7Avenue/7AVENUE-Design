@@ -1,0 +1,201 @@
+/* 7AVENUE: Clients → Projects view styling. Uses app theme tokens so it
+   matches light/dark automatically. Self-contained (own file). */
+
+.clients-view {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 40px 28px 80px;
+}
+
+.clients-view__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.clients-view__title {
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-strong, var(--fg));
+}
+
+.clients-view__sub {
+  margin-top: 6px;
+  color: var(--text-muted, var(--fg-muted));
+  font-size: 0.95rem;
+  max-width: 520px;
+}
+
+.clients-view__head-actions {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.clients-view__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+  background: var(--bg-panel, rgba(255, 255, 255, 0.04));
+  color: var(--fg);
+  font-size: 0.88rem;
+  font-weight: 500;
+  padding: 9px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.clients-view__btn:hover {
+  border-color: var(--accent, #ffdb71);
+  background: var(--bg-panel-hover, rgba(255, 255, 255, 0.07));
+}
+.clients-view__btn--ghost {
+  background: transparent;
+}
+.clients-view__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.clients-view__root-path {
+  margin-top: 18px;
+  font-size: 0.78rem;
+  color: var(--text-muted, var(--fg-muted));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  opacity: 0.7;
+}
+
+.clients-view__empty {
+  margin-top: 36px;
+  padding: 32px;
+  border: 1px dashed var(--border, rgba(255, 255, 255, 0.14));
+  border-radius: 16px;
+  text-align: center;
+  color: var(--text-muted, var(--fg-muted));
+}
+.clients-view__empty-sub {
+  margin-top: 8px;
+  font-size: 0.9rem;
+}
+.clients-view__empty code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+  color: var(--fg);
+}
+
+.clients-view__error {
+  margin-top: 18px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(255, 138, 138, 0.1);
+  border: 1px solid rgba(255, 138, 138, 0.3);
+  color: #ff8a8a;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.clients-list {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.client {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--bg-panel, rgba(255, 255, 255, 0.02));
+}
+
+.client__header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--fg);
+  text-align: left;
+}
+.client__header:hover {
+  background: var(--bg-panel-hover, rgba(255, 255, 255, 0.04));
+}
+
+.client__name {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-transform: capitalize;
+}
+
+.client__count {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted, var(--fg-muted));
+  background: var(--bg, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+
+.client__projects {
+  padding: 4px 10px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.client__no-projects {
+  padding: 12px 14px;
+  font-size: 0.85rem;
+  color: var(--text-muted, var(--fg-muted));
+  opacity: 0.7;
+}
+
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+.project-row:hover {
+  background: var(--bg-panel-hover, rgba(255, 255, 255, 0.05));
+}
+.project-row:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.project-row__name {
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.project-row__open {
+  margin-left: auto;
+  font-size: 0.82rem;
+  color: var(--accent, #ffdb71);
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.project-row:hover .project-row__open {
+  opacity: 1;
+}

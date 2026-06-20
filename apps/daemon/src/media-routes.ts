@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import nodePath from 'node:path';
 import type { Express } from 'express';
 import type { MediaExecutionPolicy } from '@open-design/contracts';
 import { defaultMediaExecutionPolicy, mediaPolicyDenial } from './media-policy.js';
@@ -383,6 +384,39 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
       }
     }
     res.json({ exists });
+  });
+
+  // 7AVENUE: list immediate subdirectories of a folder on disk. Powers the
+  // Clients view, which reads the monorepo's clients/<client>/<project>/ tree.
+  // Self-contained additive route (kept out of upstream files to minimise
+  // merge cost). Same-origin gated like the other local-fs routes.
+  app.get('/api/browse/dir', async (req, res) => {
+    if (!isLocalSameOrigin(req, getResolvedPort())) {
+      return res.status(403).json({ error: 'cross-origin request rejected' });
+    }
+    const dir = typeof req.query?.path === 'string' ? req.query.path : '';
+    if (!dir) {
+      return res.status(400).json({ error: 'path query param required' });
+    }
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      const dirs = entries
+        .filter((e) => {
+          if (e.name.startsWith('.') || e.name.startsWith('_')) return false;
+          if (e.isDirectory()) return true;
+          // resolve symlinked dirs too
+          if (e.isSymbolicLink()) {
+            try { return fs.statSync(nodePath.join(dir, e.name)).isDirectory(); }
+            catch { return false; }
+          }
+          return false;
+        })
+        .map((e) => ({ name: e.name, path: nodePath.join(dir, e.name) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      res.json({ entries: dirs });
+    } catch (err: any) {
+      res.status(404).json({ error: err?.message || 'directory not found' });
+    }
   });
 
   // Recent working directories, pruned to those that still exist on disk. A

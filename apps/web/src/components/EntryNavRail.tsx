@@ -17,6 +17,7 @@ export type EntryView =
   | 'home'
   | 'onboarding'
   | 'projects'
+  | 'clients'
   | 'tasks'
   | 'plugins'
   | 'design-systems'
@@ -146,6 +147,16 @@ export function EntryNavRail({ view, onViewChange, onNewProject, open, onClose }
           testId="entry-nav-projects"
         >
           <Icon name="folder" size={18} />
+        </NavButton>
+        {/* 7AVENUE: Clients → Projects view */}
+        <NavButton
+          active={view === 'clients'}
+          ariaLabel="Clients"
+          tooltip="Clients"
+          onClick={() => selectView('clients')}
+          testId="entry-nav-clients"
+        >
+          <Icon name="folder-filled" size={18} />
         </NavButton>
         <NavButton
           active={view === 'tasks'}

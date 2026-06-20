@@ -85,6 +85,8 @@ import type {
 } from '../types';
 import { CenteredLoader } from './Loading';
 import { DesignsTab } from './DesignsTab';
+import { ClientsView } from './ClientsView';
+import '../styles/clients-view.css';
 import { DesignSystemPreviewModal } from './DesignSystemPreviewModal';
 import { DesignSystemsTab } from './DesignSystemsTab';
 import { EntryNavRail, type EntryView as EntryViewKind } from './EntryNavRail';
@@ -835,6 +837,10 @@ export function EntryShell({
                   />
                 </div>
               )}
+            </div>
+            {/* 7AVENUE: Clients → Projects view */}
+            <div data-testid="entry-view-clients" data-active={view === 'clients' ? 'true' : 'false'} {...inactiveViewProps(view === 'clients')}>
+              <ClientsView onProjectOpened={onOpenProject} />
             </div>
             <div data-testid="entry-view-tasks" data-active={view === 'tasks' ? 'true' : 'false'} {...inactiveViewProps(view === 'tasks')}>
               <TasksView
