@@ -1,16 +1,19 @@
 // 7AVENUE: Clients → Projects navigation view.
 //
-// Self-contained custom feature (kept in its own file to minimise upstream
-// merge cost). Reads the cloned monorepo folder tree on disk via the
-// /api/browse/dir daemon endpoint:
+// Self-contained custom feature (own file → minimal upstream merge cost).
+// Reads the cloned monorepo folder tree on disk via /api/browse/dir:
 //
 //   <monorepo>/clients/<client>/<project>/
 //
-// and presents clients with their projects nested. Clicking a project opens
-// it folder-backed via the existing /api/import/folder endpoint.
+// - Lists clients with their projects nested.
+// - "New client" creates clients/<name>/ (+ a design-system/ folder).
+// - "New project" under a client creates clients/<client>/<name>/ AND opens
+//   it as a full native folder-backed project (composes existing APIs only).
+// - Clicking an existing project opens it folder-backed.
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isOpenDesignHostAvailable, pickAndImportHostProject } from "@open-design/host";
 import { Icon } from "./Icon";
-import { importFolderProject } from "../state/projects";
+import { importFolderProject, createFolder } from "../state/projects";
 
 const MONOREPO_KEY = "7av-monorepo-root";
 
@@ -45,6 +48,10 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [opening, setOpening] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // inline "new project" input state, keyed by client name
+  const [newProjectFor, setNewProjectFor] = useState<string | null>(null);
+  const [newProjectName, setNewProjectName] = useState("");
 
   const clientsRoot = useMemo(
     () => (root ? `${root.replace(/\/+$/, "")}/clients` : ""),
@@ -57,24 +64,19 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
     setError(null);
     try {
       const clientDirs = await browseDir(clientsRoot);
-      if (clientDirs.length === 0) {
-        setError(`No clients found under ${clientsRoot}. Make sure you've cloned the 7avenue-design-projects monorepo and pointed to its folder.`);
-        setClients([]);
-        return;
-      }
       const nodes: ClientNode[] = await Promise.all(
         clientDirs.map(async (c) => ({
           name: c.name,
           path: c.path,
-          // a client's children are projects (skip design-system / _shared)
           projects: (await browseDir(c.path)).filter(
             (p) => p.name !== "design-system",
           ),
         })),
       );
       setClients(nodes);
-      // auto-expand all clients on first load
-      setExpanded(Object.fromEntries(nodes.map((n) => [n.name, true])));
+      setExpanded((prev) =>
+        Object.fromEntries(nodes.map((n) => [n.name, prev[n.name] ?? true])),
+      );
     } catch (e: any) {
       setError(e?.message || "Failed to read clients folder");
     } finally {
@@ -85,7 +87,6 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
   useEffect(() => { void load(); }, [load]);
 
   const pickFolder = useCallback(async () => {
-    // use the daemon's native folder picker (same one the import flow uses)
     try {
       const resp = await fetch("/api/dialog/open-folder", { method: "POST" });
       const body = (await resp.json()) as { path?: string | null };
@@ -93,27 +94,94 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
         setRoot(body.path);
         try { localStorage.setItem(MONOREPO_KEY, body.path); } catch { /* ignore */ }
       }
-    } catch {
-      /* dialog unavailable */
-    }
+    } catch { /* dialog unavailable */ }
   }, []);
+
+  const addClient = useCallback(async () => {
+    if (!clientsRoot) { setError("Set the monorepo folder first."); return; }
+    const name = window.prompt("New client name (e.g. yousicplay)");
+    if (!name?.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const clientPath = await createFolder(clientsRoot, name.trim());
+      // seed an (empty) design-system folder so each client has one
+      try { await createFolder(clientPath, "design-system"); } catch { /* ok */ }
+      await load();
+      setExpanded((e) => ({ ...e, [name.trim()]: true }));
+    } catch (e: any) {
+      setError(e?.message || "Failed to create client");
+    } finally {
+      setBusy(false);
+    }
+  }, [clientsRoot, load]);
+
+  const hostAvailable = isOpenDesignHostAvailable();
+
+  // Open a folder as a native project. On desktop the app's security model
+  // (PR #974) requires the native folder picker to mint the import token, so
+  // we use the sanctioned host bridge — the picker opens; the user confirms
+  // the project folder. We do NOT touch upstream's security code, so Open
+  // Design updates merge cleanly. In a browser dev context (no host bridge)
+  // we fall back to the direct by-path import.
+  const openFolderAsProject = useCallback(
+    async (baseDir: string, label: string) => {
+      if (hostAvailable) {
+        const result = await pickAndImportHostProject({ name: label });
+        if (result && "ok" in result && result.ok === true) {
+          onProjectOpened?.(result.projectId);
+        } else if (result && "canceled" in result && result.canceled) {
+          /* user canceled */
+        } else {
+          throw new Error(
+            (result as any)?.reason ||
+              `Pick the project folder: ${baseDir}`,
+          );
+        }
+      } else {
+        const result = await importFolderProject({ baseDir, name: label });
+        onProjectOpened?.(result.project.id);
+      }
+    },
+    [hostAvailable, onProjectOpened],
+  );
+
+  const createProject = useCallback(
+    async (client: ClientNode) => {
+      const name = newProjectName.trim();
+      if (!name) return;
+      setBusy(true);
+      setError(null);
+      try {
+        // create the folder in the monorepo (syncs with the team via Git)…
+        const projectPath = await createFolder(client.path, name);
+        await load();
+        // …then open it as a native project (picker on desktop).
+        await openFolderAsProject(projectPath, `${client.name} — ${name}`);
+        setNewProjectFor(null);
+        setNewProjectName("");
+      } catch (e: any) {
+        setError(e?.message || "Failed to create project");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [newProjectName, openFolderAsProject, load],
+  );
 
   const openProject = useCallback(
     async (clientName: string, project: DirEntry) => {
       setOpening(project.path);
+      setError(null);
       try {
-        const result = await importFolderProject({
-          baseDir: project.path,
-          name: `${clientName} — ${project.name}`,
-        });
-        onProjectOpened?.(result.project.id);
+        await openFolderAsProject(project.path, `${clientName} — ${project.name}`);
       } catch (e: any) {
         setError(e?.message || "Failed to open project");
       } finally {
         setOpening(null);
       }
     },
-    [onProjectOpened],
+    [openFolderAsProject],
   );
 
   return (
@@ -122,10 +190,16 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
         <div>
           <h1 className="clients-view__title">Clients</h1>
           <p className="clients-view__sub">
-            Your client projects from the 7AVENUE design monorepo. Click a project to open it.
+            Your client projects from the 7AVENUE design monorepo. Create a project under a client to start designing.
           </p>
         </div>
         <div className="clients-view__head-actions">
+          {root ? (
+            <button className="clients-view__btn clients-view__btn--accent" onClick={addClient} disabled={busy}>
+              <Icon name="plus" size={15} />
+              New client
+            </button>
+          ) : null}
           <button className="clients-view__btn" onClick={pickFolder}>
             <Icon name="folder" size={15} />
             {root ? "Change folder" : "Set monorepo folder"}
@@ -168,23 +242,52 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
             </button>
             {expanded[client.name] ? (
               <div className="client__projects">
-                {client.projects.length === 0 ? (
-                  <div className="client__no-projects">No projects yet</div>
-                ) : (
-                  client.projects.map((project) => (
+                {client.projects.map((project) => (
+                  <button
+                    className="project-row"
+                    key={project.path}
+                    onClick={() => void openProject(client.name, project)}
+                    disabled={opening === project.path}
+                  >
+                    <Icon name="file-code" size={15} />
+                    <span className="project-row__name">{project.name}</span>
+                    <span className="project-row__open">
+                      {opening === project.path ? "Opening…" : "Open →"}
+                    </span>
+                  </button>
+                ))}
+
+                {newProjectFor === client.name ? (
+                  <div className="new-project-row">
+                    <Icon name="plus" size={15} />
+                    <input
+                      className="new-project-row__input"
+                      autoFocus
+                      placeholder="Project name…"
+                      value={newProjectName}
+                      onChange={(e) => setNewProjectName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void createProject(client);
+                        if (e.key === "Escape") { setNewProjectFor(null); setNewProjectName(""); }
+                      }}
+                      disabled={busy}
+                    />
                     <button
-                      className="project-row"
-                      key={project.path}
-                      onClick={() => void openProject(client.name, project)}
-                      disabled={opening === project.path}
+                      className="new-project-row__create"
+                      onClick={() => void createProject(client)}
+                      disabled={busy || !newProjectName.trim()}
                     >
-                      <Icon name="file-code" size={15} />
-                      <span className="project-row__name">{project.name}</span>
-                      <span className="project-row__open">
-                        {opening === project.path ? "Opening…" : "Open →"}
-                      </span>
+                      {busy ? "Creating…" : "Create"}
                     </button>
-                  ))
+                  </div>
+                ) : (
+                  <button
+                    className="new-project-btn"
+                    onClick={() => { setNewProjectFor(client.name); setNewProjectName(""); }}
+                  >
+                    <Icon name="plus" size={15} />
+                    New project
+                  </button>
                 )}
               </div>
             ) : null}

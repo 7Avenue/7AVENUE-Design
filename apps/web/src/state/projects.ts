@@ -161,6 +161,29 @@ export async function importFolderProject(
   return (await resp.json()) as ImportFolderResponse;
 }
 
+// 7AVENUE: create a folder under a parent path (the Clients view uses this for
+// "New client" and "New project for client"). Returns the canonical path.
+export async function createFolder(
+  parentPath: string,
+  folderName: string,
+): Promise<string> {
+  const resp = await fetch('/api/browse/mkdir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parentPath, folderName }),
+  });
+  if (!resp.ok) {
+    let message = 'Failed to create folder';
+    try {
+      const body = await resp.json();
+      if (body?.error) message = body.error;
+    } catch { /* default */ }
+    throw new Error(message);
+  }
+  return ((await resp.json()) as { path: string }).path;
+}
+
+
 export async function importClaudeDesignZip(
   file: File,
 ): Promise<{ project: Project; conversationId: string; entryFile: string }> {

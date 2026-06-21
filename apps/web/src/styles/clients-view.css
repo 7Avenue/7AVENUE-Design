@@ -199,3 +199,69 @@
 .project-row:hover .project-row__open {
   opacity: 1;
 }
+
+/* 7AVENUE: new-project + new-client controls */
+.clients-view__btn--accent {
+  background: var(--accent, #ffdb71);
+  color: #141414;
+  border-color: transparent;
+}
+.clients-view__btn--accent:hover {
+  filter: brightness(1.05);
+  background: var(--accent, #ffdb71);
+}
+
+.new-project-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  margin-top: 2px;
+  border: 1px dashed var(--border, rgba(255, 255, 255, 0.14));
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted, var(--fg-muted));
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 500;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.new-project-btn:hover {
+  border-color: var(--accent, #ffdb71);
+  color: var(--fg);
+}
+
+.new-project-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-top: 2px;
+  border: 1px solid var(--accent, #ffdb71);
+  border-radius: 10px;
+  background: var(--bg-panel, rgba(255, 255, 255, 0.03));
+}
+.new-project-row__input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--fg);
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+.new-project-row__create {
+  border: 0;
+  background: var(--accent, #ffdb71);
+  color: #141414;
+  font-weight: 600;
+  font-size: 0.82rem;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.new-project-row__create:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -419,6 +419,40 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
     }
   });
 
+  // 7AVENUE: create a subdirectory under a parent path. Powers "New client"
+  // and "New project for client" in the Clients view (creates the
+  // clients/<client>/ or clients/<client>/<project>/ folder, which is then
+  // imported as a folder-backed native project). Same-origin gated.
+  app.post('/api/browse/mkdir', async (req, res) => {
+    if (!isLocalSameOrigin(req, getResolvedPort())) {
+      return res.status(403).json({ error: 'cross-origin request rejected' });
+    }
+    const parentPath = typeof req.body?.parentPath === 'string' ? req.body.parentPath : '';
+    const folderNameRaw = typeof req.body?.folderName === 'string' ? req.body.folderName : '';
+    if (!parentPath) return res.status(400).json({ error: 'parentPath required' });
+    if (!folderNameRaw) return res.status(400).json({ error: 'folderName required' });
+    // slug the folder name: keep it filesystem-safe, no traversal
+    const folderName = folderNameRaw.trim().replace(/[/\\]+/g, '-').replace(/^\.+/, '');
+    if (!folderName || folderName === '.' || folderName === '..') {
+      return res.status(400).json({ error: 'invalid folder name' });
+    }
+    try {
+      const parentReal = fs.realpathSync(nodePath.normalize(parentPath));
+      if (!nodePath.isAbsolute(parentReal)) {
+        return res.status(400).json({ error: 'parentPath must be absolute' });
+      }
+      const target = nodePath.join(parentReal, folderName);
+      const rel = nodePath.relative(parentReal, target);
+      if (rel.startsWith('..') || nodePath.isAbsolute(rel)) {
+        return res.status(400).json({ error: 'invalid folder name' });
+      }
+      fs.mkdirSync(target, { recursive: true });
+      res.json({ path: fs.realpathSync(target) });
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || 'mkdir failed' });
+    }
+  });
+
   // Recent working directories, pruned to those that still exist on disk. A
   // folder the user deleted (or an external drive that's gone) drops out of
   // the list here and the pruned list is persisted back, so the picker's
