@@ -1,22 +1,29 @@
 // 7AVENUE: Clients → Projects navigation view.
 //
 // Self-contained custom feature (own file → minimal upstream merge cost).
-// Reads the cloned monorepo folder tree on disk via /api/browse/dir:
 //
-//   <monorepo>/clients/<client>/<project>/
+// THE MODEL (important): this view lists the app's REAL projects (from
+// /api/projects), grouped by client. The client is derived from each
+// project's baseDir path (.../clients/<client>/<id>). This is NOT a folder
+// browser — projects are real app records with real names and ids, so:
+//   - clicking a project re-opens its design canvas by ID (no re-import)
+//   - the real project name shows (not the on-disk UUID folder)
+//   - new projects appear here automatically after creation
 //
-// - Lists clients with their projects nested.
-// - "New client" creates clients/<name>/ (+ a design-system/ folder).
-// - "New project" registers the client folder as a native "project location"
-//   then uses the REAL createProject flow → the project is made inside the
-//   client folder and the user lands straight in the design canvas (native
-//   experience, no folder picker). Project syncs with the team via Git.
-// - Opening an EXISTING project folder (with files) imports it via the
-//   sanctioned host bridge (PR#974 security model — no upstream edits).
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { isOpenDesignHostAvailable, pickAndImportHostProject } from "@open-design/host";
+// "New client" creates an empty clients/<name>/ folder (+ design-system/).
+// "New project" uses the native createProject flow (registers the client
+// folder as a project location, then creates a project in it) → lands the
+// user straight in the canvas. The on-disk folder is a UUID (native default);
+// the readable name lives on the project record and is what we show.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./Icon";
-import { importFolderProject, createFolder, createProject, ensureClientProjectLocation } from "../state/projects";
+import type { Project } from "../types";
+import {
+  listProjects,
+  createProject,
+  createFolder,
+  ensureClientProjectLocation,
+} from "../state/projects";
 
 const MONOREPO_KEY = "7av-monorepo-root";
 
@@ -32,10 +39,27 @@ async function browseDir(path: string): Promise<DirEntry[]> {
   return body.entries ?? [];
 }
 
+// derive the client name from a project's baseDir: .../clients/<client>/<...>
+function clientFromBaseDir(baseDir: string | undefined, clientsRoot: string): string | null {
+  if (!baseDir) return null;
+  const root = clientsRoot.replace(/\/+$/, "") + "/";
+  if (!baseDir.startsWith(root)) return null;
+  const rest = baseDir.slice(root.length);
+  const seg = rest.split("/")[0];
+  return seg || null;
+}
+
+// strip the "<client> — " prefix we add at create time, for clean display
+function displayName(project: Project, client: string): string {
+  const prefix = `${client} — `;
+  if (project.name?.startsWith(prefix)) return project.name.slice(prefix.length);
+  return project.name || "Untitled";
+}
+
 interface ClientNode {
   name: string;
   path: string;
-  projects: DirEntry[];
+  projects: Project[];
 }
 
 export interface ClientsViewProps {
@@ -50,9 +74,7 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [opening, setOpening] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // inline "new project" input state, keyed by client name
   const [newProjectFor, setNewProjectFor] = useState<string | null>(null);
   const [newProjectName, setNewProjectName] = useState("");
 
@@ -61,33 +83,65 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
     [root],
   );
 
+  // Build the client list = every client folder on disk, each populated with
+  // the REAL app projects whose baseDir lives under that client.
   const load = useCallback(async () => {
     if (!clientsRoot) { setClients([]); return; }
     setLoading(true);
     setError(null);
     try {
-      const clientDirs = await browseDir(clientsRoot);
-      const nodes: ClientNode[] = await Promise.all(
-        clientDirs.map(async (c) => ({
-          name: c.name,
-          path: c.path,
-          projects: (await browseDir(c.path)).filter(
-            (p) => p.name !== "design-system",
-          ),
-        })),
-      );
+      const [clientDirs, allProjects] = await Promise.all([
+        browseDir(clientsRoot),
+        listProjects(),
+      ]);
+      const byClient = new Map<string, Project[]>();
+      for (const p of allProjects) {
+        const c = clientFromBaseDir(p.metadata?.baseDir, clientsRoot);
+        if (!c) continue;
+        if (!byClient.has(c)) byClient.set(c, []);
+        byClient.get(c)!.push(p);
+      }
+      const nodes: ClientNode[] = clientDirs.map((c) => ({
+        name: c.name,
+        path: c.path,
+        projects: (byClient.get(c.name) ?? []).sort(
+          (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
+        ),
+      }));
       setClients(nodes);
       setExpanded((prev) =>
         Object.fromEntries(nodes.map((n) => [n.name, prev[n.name] ?? true])),
       );
     } catch (e: any) {
-      setError(e?.message || "Failed to read clients folder");
+      setError(e?.message || "Failed to load clients");
     } finally {
       setLoading(false);
     }
   }, [clientsRoot]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // The entry views stay MOUNTED (just hidden) when you switch tabs, so the
+  // mount effect above won't re-fire when you return to Clients. Reload
+  // whenever this view becomes visible again (e.g. after designing a project
+  // and clicking back to Clients) so newly-created projects always show.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) void load();
+        }
+      },
+      { threshold: 0.01 },
+    );
+    obs.observe(el);
+    const onVisible = () => { if (document.visibilityState === "visible") void load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { obs.disconnect(); document.removeEventListener("visibilitychange", onVisible); };
+  }, [load]);
 
   const pickFolder = useCallback(async () => {
     try {
@@ -108,7 +162,6 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
     setError(null);
     try {
       const clientPath = await createFolder(clientsRoot, name.trim());
-      // seed an (empty) design-system folder so each client has one
       try { await createFolder(clientPath, "design-system"); } catch { /* ok */ }
       await load();
       setExpanded((e) => ({ ...e, [name.trim()]: true }));
@@ -119,14 +172,8 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
     }
   }, [clientsRoot, load]);
 
-  const hostAvailable = isOpenDesignHostAvailable();
-
-  // NEW project under a client → use the REAL native createProject flow.
-  // We register the client folder as a "project location", then createProject
-  // with that locationId — the daemon makes the project INSIDE the client
-  // folder and the app drops the user straight into the design canvas (no
-  // folder picker, no import). This is the genuine native experience, and the
-  // project lands in the monorepo so it syncs with the team via Git.
+  // NEW project → native createProject inside the client's project location.
+  // Lands the user straight in the design canvas.
   const handleCreateProject = useCallback(
     async (client: ClientNode) => {
       const name = newProjectName.trim();
@@ -143,57 +190,31 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
         });
         setNewProjectFor(null);
         setNewProjectName("");
-        void load();
-        onProjectOpened?.(result.project.id); // navigates into the canvas
+        onProjectOpened?.(result.project.id); // → design canvas
       } catch (e: any) {
         setError(e?.message || "Failed to create project");
       } finally {
         setBusy(false);
       }
     },
-    [newProjectName, load, onProjectOpened],
+    [newProjectName, onProjectOpened],
   );
 
-  // OPEN an EXISTING project folder (one that already has design files, e.g.
-  // Lydi). These pre-existing folders must be imported. On desktop the app's
-  // security model (PR #974) requires the native folder picker to mint the
-  // import token; we use the sanctioned host bridge. (New projects above never
-  // hit this path.) Browser-dev fallback: direct by-path import.
+  // OPEN an existing project → navigate by its project id (re-opens canvas).
   const openProject = useCallback(
-    async (clientName: string, project: DirEntry) => {
-      setOpening(project.path);
-      setError(null);
-      try {
-        const label = `${clientName} — ${project.name}`;
-        if (hostAvailable) {
-          const result = await pickAndImportHostProject({ name: label });
-          if (result && "ok" in result && result.ok === true) {
-            onProjectOpened?.(result.projectId);
-          } else if (result && "canceled" in result && result.canceled) {
-            /* canceled */
-          } else {
-            throw new Error((result as any)?.reason || `Pick the project folder: ${project.path}`);
-          }
-        } else {
-          const result = await importFolderProject({ baseDir: project.path, name: label });
-          onProjectOpened?.(result.project.id);
-        }
-      } catch (e: any) {
-        setError(e?.message || "Failed to open project");
-      } finally {
-        setOpening(null);
-      }
+    (project: Project) => {
+      onProjectOpened?.(project.id);
     },
-    [hostAvailable, onProjectOpened],
+    [onProjectOpened],
   );
 
   return (
-    <div className="clients-view">
+    <div className="clients-view" ref={rootRef}>
       <div className="clients-view__head">
         <div>
           <h1 className="clients-view__title">Clients</h1>
           <p className="clients-view__sub">
-            Your client projects from the 7AVENUE design monorepo. Create a project under a client to start designing.
+            Your client projects. Create a project under a client, then click it any time to keep designing.
           </p>
         </div>
         <div className="clients-view__head-actions">
@@ -248,15 +269,12 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
                 {client.projects.map((project) => (
                   <button
                     className="project-row"
-                    key={project.path}
-                    onClick={() => void openProject(client.name, project)}
-                    disabled={opening === project.path}
+                    key={project.id}
+                    onClick={() => openProject(project)}
                   >
                     <Icon name="file-code" size={15} />
-                    <span className="project-row__name">{project.name}</span>
-                    <span className="project-row__open">
-                      {opening === project.path ? "Opening…" : "Open →"}
-                    </span>
+                    <span className="project-row__name">{displayName(project, client.name)}</span>
+                    <span className="project-row__open">Open →</span>
                   </button>
                 ))}
 
