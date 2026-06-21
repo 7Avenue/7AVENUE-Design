@@ -162,7 +162,7 @@ export async function importFolderProject(
 }
 
 // 7AVENUE: create a folder under a parent path (the Clients view uses this for
-// "New client" and "New project for client"). Returns the canonical path.
+// "New client"). Returns the canonical path.
 export async function createFolder(
   parentPath: string,
   folderName: string,
@@ -181,6 +181,48 @@ export async function createFolder(
     throw new Error(message);
   }
   return ((await resp.json()) as { path: string }).path;
+}
+
+// 7AVENUE: ensure a client folder is registered as a native "project location"
+// so the REAL createProject flow can make projects inside it (which drops the
+// user straight into the design canvas — no folder picker, no import). The PUT
+// replaces the full location set, so we merge: keep existing locations, add
+// ours if missing. Returns the location id to pass as projectLocationId.
+export async function ensureClientProjectLocation(
+  clientName: string,
+  clientPath: string,
+): Promise<string> {
+  const locationId = `7av-client-${clientName}`;
+  let existing: Array<{ id?: string; name?: string; path?: string; builtIn?: boolean }> = [];
+  try {
+    const resp = await fetch('/api/project-locations');
+    if (resp.ok) {
+      const body = (await resp.json()) as { locations?: typeof existing };
+      existing = body.locations ?? [];
+    }
+  } catch { /* none */ }
+  // user (non-builtIn) locations to preserve
+  const userLocations = existing.filter((l) => !l.builtIn && l.path);
+  if (userLocations.some((l) => l.id === locationId)) return locationId;
+  const next = [
+    ...userLocations.map((l) => ({ id: l.id, name: l.name, path: l.path })),
+    { id: locationId, name: clientName, path: clientPath },
+  ];
+  const resp = await fetch('/api/project-locations', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ locations: next }),
+  });
+  if (!resp.ok) {
+    let message = 'Failed to register client location';
+    try {
+      const body = await resp.json();
+      if (body?.error?.message) message = body.error.message;
+      else if (typeof body?.error === 'string') message = body.error;
+    } catch { /* default */ }
+    throw new Error(message);
+  }
+  return locationId;
 }
 
 

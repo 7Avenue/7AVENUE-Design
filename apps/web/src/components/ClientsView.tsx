@@ -7,13 +7,16 @@
 //
 // - Lists clients with their projects nested.
 // - "New client" creates clients/<name>/ (+ a design-system/ folder).
-// - "New project" under a client creates clients/<client>/<name>/ AND opens
-//   it as a full native folder-backed project (composes existing APIs only).
-// - Clicking an existing project opens it folder-backed.
+// - "New project" registers the client folder as a native "project location"
+//   then uses the REAL createProject flow → the project is made inside the
+//   client folder and the user lands straight in the design canvas (native
+//   experience, no folder picker). Project syncs with the team via Git.
+// - Opening an EXISTING project folder (with files) imports it via the
+//   sanctioned host bridge (PR#974 security model — no upstream edits).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isOpenDesignHostAvailable, pickAndImportHostProject } from "@open-design/host";
 import { Icon } from "./Icon";
-import { importFolderProject, createFolder } from "../state/projects";
+import { importFolderProject, createFolder, createProject, ensureClientProjectLocation } from "../state/projects";
 
 const MONOREPO_KEY = "7av-monorepo-root";
 
@@ -118,70 +121,70 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
 
   const hostAvailable = isOpenDesignHostAvailable();
 
-  // Open a folder as a native project. On desktop the app's security model
-  // (PR #974) requires the native folder picker to mint the import token, so
-  // we use the sanctioned host bridge — the picker opens; the user confirms
-  // the project folder. We do NOT touch upstream's security code, so Open
-  // Design updates merge cleanly. In a browser dev context (no host bridge)
-  // we fall back to the direct by-path import.
-  const openFolderAsProject = useCallback(
-    async (baseDir: string, label: string) => {
-      if (hostAvailable) {
-        const result = await pickAndImportHostProject({ name: label });
-        if (result && "ok" in result && result.ok === true) {
-          onProjectOpened?.(result.projectId);
-        } else if (result && "canceled" in result && result.canceled) {
-          /* user canceled */
-        } else {
-          throw new Error(
-            (result as any)?.reason ||
-              `Pick the project folder: ${baseDir}`,
-          );
-        }
-      } else {
-        const result = await importFolderProject({ baseDir, name: label });
-        onProjectOpened?.(result.project.id);
-      }
-    },
-    [hostAvailable, onProjectOpened],
-  );
-
-  const createProject = useCallback(
+  // NEW project under a client → use the REAL native createProject flow.
+  // We register the client folder as a "project location", then createProject
+  // with that locationId — the daemon makes the project INSIDE the client
+  // folder and the app drops the user straight into the design canvas (no
+  // folder picker, no import). This is the genuine native experience, and the
+  // project lands in the monorepo so it syncs with the team via Git.
+  const handleCreateProject = useCallback(
     async (client: ClientNode) => {
       const name = newProjectName.trim();
       if (!name) return;
       setBusy(true);
       setError(null);
       try {
-        // create the folder in the monorepo (syncs with the team via Git)…
-        const projectPath = await createFolder(client.path, name);
-        await load();
-        // …then open it as a native project (picker on desktop).
-        await openFolderAsProject(projectPath, `${client.name} — ${name}`);
+        const locationId = await ensureClientProjectLocation(client.name, client.path);
+        const result = await createProject({
+          name: `${client.name} — ${name}`,
+          projectLocationId: locationId,
+          skillId: null,
+          designSystemId: null,
+        });
         setNewProjectFor(null);
         setNewProjectName("");
+        void load();
+        onProjectOpened?.(result.project.id); // navigates into the canvas
       } catch (e: any) {
         setError(e?.message || "Failed to create project");
       } finally {
         setBusy(false);
       }
     },
-    [newProjectName, openFolderAsProject, load],
+    [newProjectName, load, onProjectOpened],
   );
 
+  // OPEN an EXISTING project folder (one that already has design files, e.g.
+  // Lydi). These pre-existing folders must be imported. On desktop the app's
+  // security model (PR #974) requires the native folder picker to mint the
+  // import token; we use the sanctioned host bridge. (New projects above never
+  // hit this path.) Browser-dev fallback: direct by-path import.
   const openProject = useCallback(
     async (clientName: string, project: DirEntry) => {
       setOpening(project.path);
       setError(null);
       try {
-        await openFolderAsProject(project.path, `${clientName} — ${project.name}`);
+        const label = `${clientName} — ${project.name}`;
+        if (hostAvailable) {
+          const result = await pickAndImportHostProject({ name: label });
+          if (result && "ok" in result && result.ok === true) {
+            onProjectOpened?.(result.projectId);
+          } else if (result && "canceled" in result && result.canceled) {
+            /* canceled */
+          } else {
+            throw new Error((result as any)?.reason || `Pick the project folder: ${project.path}`);
+          }
+        } else {
+          const result = await importFolderProject({ baseDir: project.path, name: label });
+          onProjectOpened?.(result.project.id);
+        }
       } catch (e: any) {
         setError(e?.message || "Failed to open project");
       } finally {
         setOpening(null);
       }
     },
-    [openFolderAsProject],
+    [hostAvailable, onProjectOpened],
   );
 
   return (
@@ -267,14 +270,14 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
                       value={newProjectName}
                       onChange={(e) => setNewProjectName(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") void createProject(client);
+                        if (e.key === "Enter") void handleCreateProject(client);
                         if (e.key === "Escape") { setNewProjectFor(null); setNewProjectName(""); }
                       }}
                       disabled={busy}
                     />
                     <button
                       className="new-project-row__create"
-                      onClick={() => void createProject(client)}
+                      onClick={() => void handleCreateProject(client)}
                       disabled={busy || !newProjectName.trim()}
                     >
                       {busy ? "Creating…" : "Create"}
