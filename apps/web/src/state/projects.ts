@@ -225,6 +225,39 @@ export async function ensureClientProjectLocation(
   return locationId;
 }
 
+// 7AVENUE: register EVERY client folder as a project location, then scan to
+// auto-discover projects from their .open-design/project.json manifests. This
+// is what makes sync foolproof: a project created on one machine writes a
+// manifest into its folder; that folder + manifest sync via Git; on the other
+// machine, scanning rebuilds the project with the SAME id + name (dedup'd by
+// id), so pulled projects auto-appear with no manual import.
+export async function registerAndScanClients(
+  clients: Array<{ name: string; path: string }>,
+): Promise<void> {
+  // read existing locations, merge in every client (idempotent)
+  let existing: Array<{ id?: string; name?: string; path?: string; builtIn?: boolean }> = [];
+  try {
+    const resp = await fetch("/api/project-locations");
+    if (resp.ok) existing = ((await resp.json()) as { locations?: typeof existing }).locations ?? [];
+  } catch { /* none */ }
+  const userLocations = existing.filter((l) => !l.builtIn && l.path);
+  const byId = new Map(userLocations.map((l) => [l.id, l]));
+  for (const c of clients) {
+    const id = `7av-client-${c.name}`;
+    if (!byId.has(id)) byId.set(id, { id, name: c.name, path: c.path });
+  }
+  const next = [...byId.values()].map((l) => ({ id: l.id, name: l.name, path: l.path }));
+  try {
+    await fetch("/api/project-locations", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locations: next }),
+    });
+    // discover projects from manifests (registers any pulled from Git)
+    await fetch("/api/project-locations/scan", { method: "POST" });
+  } catch { /* best-effort: list still shows what's already registered */ }
+}
+
 
 export async function importClaudeDesignZip(
   file: File,

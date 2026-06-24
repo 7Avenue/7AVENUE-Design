@@ -23,6 +23,7 @@ import {
   createProject,
   createFolder,
   ensureClientProjectLocation,
+  registerAndScanClients,
 } from "../state/projects";
 
 const MONOREPO_KEY = "7av-monorepo-root";
@@ -90,10 +91,13 @@ export function ClientsView({ onProjectOpened }: ClientsViewProps) {
     setLoading(true);
     setError(null);
     try {
-      const [clientDirs, allProjects] = await Promise.all([
-        browseDir(clientsRoot),
-        listProjects(),
-      ]);
+      // 1. discover the client folders
+      const clientDirs = await browseDir(clientsRoot);
+      // 2. register them as project locations + scan manifests → this picks up
+      //    any projects pulled from Git (foolproof sync, no manual import)
+      await registerAndScanClients(clientDirs.map((c) => ({ name: c.name, path: c.path })));
+      // 3. now list the real projects (including just-scanned ones)
+      const allProjects = await listProjects();
       const byClient = new Map<string, Project[]>();
       for (const p of allProjects) {
         const c = clientFromBaseDir(p.metadata?.baseDir, clientsRoot);
